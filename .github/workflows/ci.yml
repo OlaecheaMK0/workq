@@ -1,0 +1,35 @@
+name: workq checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: workq_test
+          POSTGRES_USER: workq
+          POSTGRES_PASSWORD: ci-only
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U workq -d workq_test"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      COMPOSE_PROJECT_NAME: ci-workq-${{ github.run_id }}-${{ github.run_attempt }}
+      TEST_DATABASE_URL: postgres://workq:ci-only@localhost:5432/workq_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.1'
+          cache: true
+      - run: go vet ./...
+      - run: test -z "$(gofmt -l cmd internal)"
+      - run: go test -race -count=1 ./...
+      - run: docker build -t workq:ci .
+      - run: docker compose up --build -d --wait
+      - run: python3 scripts/smoke.py
+      - if: always()
+        run: docker compose down --volumes

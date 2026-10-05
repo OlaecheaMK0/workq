@@ -1,0 +1,11 @@
+.env
+bin/
+.cache/
+coverage.out
+
+.env.*
+!.env.example
+.DS_Store
+artifacts/
+artifacts-*/
+artifacts-*.log

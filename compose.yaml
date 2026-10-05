@@ -1,0 +1,59 @@
+name: college-workq
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: workq
+      POSTGRES_USER: workq
+      POSTGRES_PASSWORD: local-demo-only
+    ports:
+      - "127.0.0.1:15433:5432"
+    volumes:
+      - workq-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U workq -d workq"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+    restart: unless-stopped
+  api:
+    build: .
+    image: college-workq:local
+    command: ["api"]
+    environment:
+      DATABASE_URL: postgres://workq:local-demo-only@postgres:5432/workq?sslmode=disable
+      HTTP_ADDR: :8080
+      API_TOKEN: ${WORKQ_API_TOKEN:-}
+    ports:
+      - "127.0.0.1:18380:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+  worker:
+    build: .
+    image: college-workq:local
+    command: ["worker"]
+    environment:
+      DATABASE_URL: postgres://workq:local-demo-only@postgres:5432/workq?sslmode=disable
+      WORKER_CONCURRENCY: "2"
+      LEASE_DURATION: 5s
+      RETRY_BASE: 500ms
+      RETRY_MAX: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+volumes:
+  workq-data:

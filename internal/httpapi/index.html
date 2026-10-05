@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8" /><meta
+    name="viewport"
+    content="width=device-width,initial-scale=1"
+  />
+  <title>workq · durable background jobs</title>
+  <style>
+    :root {
+      font-family: system-ui, sans-serif;
+      color: #e7edf6;
+      background: #101721;
+    }
+    body {
+      max-width: 1020px;
+      margin: 40px auto;
+      padding: 0 24px;
+    }
+    h1 {
+      font-size: 44px;
+      margin-bottom: 8px;
+      letter-spacing: -2px;
+    }
+    p {
+      color: #a8b6ca;
+      line-height: 1.6;
+    }
+    code,
+    .mono {
+      font-family: ui-monospace, monospace;
+    }
+    header {
+      border-bottom: 1px solid #2d3a4e;
+      padding-bottom: 24px;
+    }
+    .badge {
+      color: #a7e4cd;
+      background: #18382f;
+      padding: 5px 9px;
+      border-radius: 5px;
+      font-size: 12px;
+    }
+    section {
+      margin-top: 28px;
+    }
+    #stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+    .stat {
+      background: #1a2534;
+      padding: 20px;
+      border-radius: 8px;
+    }
+    .stat strong {
+      display: block;
+      font-size: 30px;
+    }
+    .stat span {
+      font-size: 13px;
+      color: #9fb1ca;
+    }
+    button {
+      background: #75ddb7;
+      border: 0;
+      color: #10221b;
+      padding: 12px 16px;
+      border-radius: 5px;
+      font-weight: 650;
+      cursor: pointer;
+    }
+    button:disabled {
+      opacity: 0.6;
+    }
+    input {
+      padding: 11px;
+      border: 1px solid #344157;
+      border-radius: 5px;
+      background: #1a2534;
+      color: #fff;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    td,
+    th {
+      padding: 13px 10px;
+      border-bottom: 1px solid #2d3a4e;
+      text-align: left;
+    }
+    td {
+      vertical-align: top;
+    }
+    .hint {
+      font-size: 13px;
+    }
+    .actions {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    #message {
+      white-space: pre-wrap;
+      font-size: 13px;
+      color: #d5c397;
+    }
+    .table-wrap {
+      overflow-x: auto;
+    }
+    footer {
+      margin-top: 30px;
+      font-size: 12px;
+      color: #8192a9;
+    }
+    @media (max-width: 650px) {
+      #stats {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      h1 {
+        font-size: 36px;
+      }
+    }
+  </style>
+  <header>
+    <span class="badge">Go + PostgreSQL</span>
+    <h1>workq</h1>
+    <p>
+      A durable job queue with leased workers, bounded retries, and a report
+      handler that safely tolerates replay.
+    </p>
+  </header>
+  <section id="stats" aria-label="Job counts"></section>
+  <section>
+    <h2>Try a synthetic job</h2>
+    <p class="hint">
+      Reports sum a small list of numbers. Retry submits a job that fails twice
+      before succeeding. Dead letter exhausts three attempts. These jobs have no
+      external effects.
+    </p>
+    <div class="actions">
+      <button data-case="success">Submit report</button
+      ><button data-case="retry">Try retries</button
+      ><button data-case="dead">Try dead letter</button
+      ><input
+        id="token"
+        type="password"
+        placeholder="Bearer token, if configured"
+        aria-label="Bearer token"
+      />
+    </div>
+    <p id="message" role="status"></p>
+  </section>
+  <section>
+    <h2>Recent jobs</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Job</th>
+            <th>State</th>
+            <th>Attempts</th>
+            <th>Result / last error</th>
+          </tr>
+        </thead>
+        <tbody id="jobs"></tbody>
+      </table>
+    </div>
+  </section>
+  <footer>
+    Delivery: at least once. A lease token fences acknowledgment; a unique
+    report record makes this handler idempotent. Public hosting requires
+    authentication, TLS, and an ingress rate limit.
+  </footer>
+  <script>
+    const token = document.getElementById("token"),
+      message = document.getElementById("message");
+    function headers() {
+      const h = { "Content-Type": "application/json" };
+      if (token.value) h.Authorization = "Bearer " + token.value;
+      return h;
+    }
+    async function api(path, options = {}) {
+      const r = await fetch(path, {
+        ...options,
+        headers: { ...headers(), ...options.headers },
+      });
+      const data = await r.json();
+      if (!r.ok) throw Error(data.error || "Request failed");
+      return data;
+    }
+    function cell(text) {
+      const td = document.createElement("td");
+      td.textContent = text;
+      return td;
+    }
+    async function refresh() {
+      try {
+        const [counts, data] = await Promise.all([
+          api("/v1/stats"),
+          api("/v1/jobs?limit=20"),
+        ]);
+        document.getElementById("stats").replaceChildren(
+          ...Object.entries(counts).map(([state, count]) => {
+            const el = document.createElement("div");
+            el.className = "stat";
+            const strong = document.createElement("strong");
+            strong.textContent = count;
+            const label = document.createElement("span");
+            label.textContent = state;
+            el.append(strong, label);
+            return el;
+          }),
+        );
+        document.getElementById("jobs").replaceChildren(
+          ...data.jobs.map((j) => {
+            const tr = document.createElement("tr");
+            tr.append(
+              cell(j.id.slice(0, 8)),
+              cell(j.state),
+              cell(j.attempts + " / " + j.max_attempts),
+              cell(
+                j.result
+                  ? JSON.stringify(j.result)
+                  : j.last_error || "Waiting for worker",
+              ),
+            );
+            return tr;
+          }),
+        );
+      } catch (e) {
+        message.textContent = e.message;
+      }
+    }
+    document.querySelectorAll("button[data-case]").forEach((b) =>
+      b.addEventListener("click", async () => {
+        b.disabled = true;
+        try {
+          const choice = b.dataset.case;
+          const result = await api("/v1/jobs", {
+            method: "POST",
+            headers: { "Idempotency-Key": crypto.randomUUID() },
+            body: JSON.stringify({
+              kind: "report",
+              payload: {
+                name: "Demo " + choice,
+                items: [10, 20, 30],
+                delay_ms: 500,
+                fail_until_attempt:
+                  choice === "retry" ? 2 : choice === "dead" ? 10 : 0,
+              },
+              max_attempts: 3,
+            }),
+          });
+          message.textContent = "Queued " + result.job.id;
+          await refresh();
+        } catch (e) {
+          message.textContent = e.message;
+        } finally {
+          b.disabled = false;
+        }
+      }),
+    );
+    token.addEventListener("change", refresh);
+    refresh();
+    setInterval(refresh, 2000);
+  </script>
+</html>

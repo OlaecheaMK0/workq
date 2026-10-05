@@ -1,0 +1,10 @@
+.git
+.env
+bin
+.cache
+coverage.out
+
+.env.*
+!.env.example
+artifacts
+artifacts-*
