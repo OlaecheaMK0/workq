@@ -14,10 +14,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/OlaecheaMK0/workq/internal/queue"
 	"github.com/OlaecheaMK0/workq/internal/worker"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func testStore(t *testing.T) *queue.Store {
